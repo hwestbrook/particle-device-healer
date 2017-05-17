@@ -68,23 +68,32 @@ var parseSafeMode = function(event) {
   for (var i = 0; i < modules.length; i++) {
     var module = modules[i];
     var moduleObj = {
+      size: module.s,
+      location: module.l,
+      locationName: moduleStoreLocation(module.l),
+      validCheck: module.vc,
+      validVerify: module.vv,
+      validCompare: module.vc === module.vv,
       function: module.f,
+      functionName: moduleFunction(module.f),
       name: module.n,
       version: module.v,
       versionName: moduleVersion(module.v, module.f),
       dependencies: [],
     };
-    obj.modules.push(moduleObj);
     if (module.d.length) {
       for (var j = 0; j < module.d.length; j++) {
         var dependencyObj = {
-          function: moduleFunction(module.d[j].f),
+          function: module.d[j].f,
+          functionName: moduleFunction(module.d[j].f),
           name: module.d[j].n,
-          version: module.d[j].v),
+          version: module.d[j].v,
+          versionName: moduleVersion(module.d[j].v, module.d[j].f),
         };
-        obj.modules.moduleObj[i].dependencies.push(dependencyObj);
+        moduleObj.dependencies.push(dependencyObj);
       }
     }
+    obj.modules.push(moduleObj);
   }
 
   // find the key modules
@@ -167,9 +176,9 @@ function moduleStoreLocation(l) {
   return location;
 }
 
-function moduleFunction(l) {
+function moduleFunction(f) {
   var modFunc = 'N/A';
-  switch(l) {
+  switch(f) {
     case 'n':
       modFunc = 'MODULE_FUNCTION_NONE';
       break;
