@@ -58,3 +58,4 @@ typings/
 .env
 
 secrets
+.DS_Store
