@@ -5,10 +5,12 @@ var token;
 
 var EventSource = require('eventsource');
 
+var log = require('./log.js');
+
 particle.login({username: authParticle.user_name, password: authParticle.password}).then(
   function(data) {
     token = data.body.access_token;
-    console.log("Logged in to Particle, setting up device event stream");
+    log.info("Logged in to Particle, setting up device event stream");
 
     // using event source instead of Particle api, as it doesn't seem to
     // be reliable for subscribing to events... seems weird
@@ -18,28 +20,30 @@ particle.login({username: authParticle.user_name, password: authParticle.passwor
     es.addEventListener('spark/status/safe-mode', parseEvents);
     es.addEventListener('spark/flash/status', parseEvents);
     es.addEventListener('open', function(e) {
-      console.log("Connection to Particle events is open");
+      log.info("Connection to Particle events is open");
     }, false);
     es.addEventListener('error', function(e) {
       if (e.readyState == EventSource.CLOSED) {
-        console.error("Connection was closed");
+        log.error("Connection was closed");
       }
     }, false);
   },
   function (err) {
-    console.log('Could not log in.', err);
+    log.info('Could not log in to Particle.', err);
   }
 );
 
 var parseEvents = function(event) {
-  console.log(event.type);
   var data = JSON.parse(event.data);
   switch(event.type) {
     case 'spark/status': 
-      console.log('Device ' + data.coreid + ' status: ' + data.data);
+      log.info('Device ' + data.coreid + ' status: ' + data.data);
+      break;
+    case 'spark/flash/status': 
+      log.info('Device ' + data.coreid + ' flash status: ' + data.data);
       break;
     case 'spark/device/app-hash':
-      console.log('Device ' + data.coreid + ' has new firmware: ' + data.data);
+      log.info('Device ' + data.coreid + ' has new firmware: ' + data.data);
       break;
     case 'spark/status/safe-mode': 
       parseSafeMode(data);
@@ -48,66 +52,79 @@ var parseEvents = function(event) {
 }
 
 var parseSafeMode = function(event) {
-  console.log('Device ' + event.coreid + ' is in safe mode');
+  log.info('Device ' + event.coreid + ' is in safe mode');
   var safeModeData = JSON.parse(event.data);
-  console.log('Device info:');
-  console.log('     Platform: ' + safeModeData.p + ' - Name: ' + platformIdToName(safeModeData.p));
-  console.log('     IMEI: ' + safeModeData.imei + ' - ICCID: ' + safeModeData.iccid);
+  var obj = {
+    address: event.coreid,
+    publishedAt: event.published_at,
+    name: event.name,
+    platformId: safeModeData.p,
+    platform: platformIdToName(safeModeData.p),
+    imei: safeModeData.imei,
+    iccid: safeModeData.iccid,
+    modules: [],
+  };
   var modules = safeModeData.m;
-  console.log('     Modules: ');
   for (var i = 0; i < modules.length; i++) {
     var module = modules[i];
-    console.log('          Function: ' + moduleFunction(module.f) + ' - Num: ' + module.n + ' - Version: ' + module.v + ' - Dependencies: ' + (module.d.length ? 'Yes' : 'No'));
+    var moduleObj = {
+      function: module.f,
+      name: module.n,
+      version: module.v,
+      versionName: moduleVersion(module.v, module.f),
+      dependencies: [],
+    };
+    obj.modules.push(moduleObj);
     if (module.d.length) {
       for (var j = 0; j < module.d.length; j++) {
-        console.log('               Dependency: Function: ' + moduleFunction(module.d[j].f) + ' - Num: ' + module.d[j].n + ' - Version: ' + module.d[j].v);
+        var dependencyObj = {
+          function: moduleFunction(module.d[j].f),
+          name: module.d[j].n,
+          version: module.d[j].v),
+        };
+        obj.modules.moduleObj[i].dependencies.push(dependencyObj);
       }
     }
   }
 
   // find the key modules
-  var userPart = modules.find(findUserPart);
-  var systemPart1 = modules.find(findSystemPart1);
-  var systemPart2 = modules.find(findSystemPart2);
-  var systemPart3 = modules.find(findSystemPart3);
+  obj.userPart = modules.find(findUserPart);
+  obj.systemPart1 = modules.find(findSystemPart1);
+  obj.systemPart2 = modules.find(findSystemPart2);
+  obj.systemPart3 = modules.find(findSystemPart3);
 
-  console.log({
-    userPart: userPart,
-    systemPart1: systemPart1,
-    systemPart2: systemPart2,
-    systemPart3: systemPart3,
-  });
+  log.info(obj);
 
-  if (safeModeData.p !== 10) {
-    console.error('Cancelling update... This library is not working for anything other than the Electron');
+  if (obj.platformId !== 10) {
+    log.error('Cancelling update... This library is not working for anything other than the Electron');
     return;
   }
 
   // check if the system has the right modules
-  var userPartRequires = userPart.d[0].v;
+  var userPartRequires = obj.userPart.d[0].v;
 
-  if (parseInt(systemPart1.v, 10) < 21 || parseInt(systemPart2.v, 10) < 21) {
-    console.log('All devices should be running 0.5.3, especially if you want to get to 0.6.X versions');
-    if (parseInt(systemPart1.v, 10) < 21) {
-      flashSystem(21, 1, event.coreid);
-    } else if (parseInt(systemPart2.v, 10) < 21) {
-      flashSystem(21, 2, event.coreid);
+  if (parseInt(obj.systemPart1.v, 10) < 21 || parseInt(obj.systemPart2.v, 10) < 21) {
+    log.warn('All devices should be running 0.5.3, especially if you want to get to 0.6.X versions');
+    if (parseInt(obj.systemPart1.v, 10) < 21) {
+      flashSystem(21, 1, obj.address);
+    } else if (parseInt(obj.systemPart2.v, 10) < 21) {
+      flashSystem(21, 2, obj.address);
     }
   }
 
-  if (systemPart3 == null && parseInt(userPartRequires, 10) > parseInt(systemPart1.v, 10)) {
-    flashSystem(userPartRequires, 1, event.coreid);
-  } else if (parseInt(userPartRequires, 10) > parseInt(systemPart3.v, 10)) {
-    console.log('The application requires system ' + userPartRequires + ' system part 1 (3) version is ' + systemPart3.v);
-    flashSystem(userPartRequires, 1, event.coreid);
-  } else if(parseInt(userPartRequires, 10) > parseInt(systemPart1.v, 10)) {
-    console.log('The application requires system ' + userPartRequires + ' system part 2 (1) version is ' + systemPart1.v);
-    flashSystem(userPartRequires, 2, event.coreid);
-  } else if(parseInt(userPartRequires, 10) > parseInt(systemPart2.v, 10)) {
-    console.log('The application requires system ' + userPartRequires + ' system part 3 (2) version is ' + systemPart2.v);
-    flashSystem(userPartRequires, 3, event.coreid);
+  if (obj.systemPart3 == null && parseInt(userPartRequires, 10) > parseInt(obj.systemPart1.v, 10)) {
+    flashSystem(userPartRequires, 1, obj.address);
+  } else if (parseInt(userPartRequires, 10) > parseInt(obj.systemPart3.v, 10)) {
+    log.info('The application requires system ' + userPartRequires + ' system part 1 (3) version is ' + obj.systemPart3.v);
+    flashSystem(userPartRequires, 1, obj.address);
+  } else if(parseInt(userPartRequires, 10) > parseInt(obj.systemPart1.v, 10)) {
+    log.info('The application requires system ' + userPartRequires + ' system part 2 (1) version is ' + obj.systemPart1.v);
+    flashSystem(userPartRequires, 2, obj.address);
+  } else if(parseInt(userPartRequires, 10) > parseInt(obj.systemPart2.v, 10)) {
+    log.info('The application requires system ' + userPartRequires + ' system part 3 (2) version is ' + obj.systemPart2.v);
+    flashSystem(userPartRequires, 3, obj.address);
   } else {
-    console.log('The application version requirement, ' + userPartRequires + ' is less than or equal to the system versions for part 1 (3), ' + systemPart3.v + ', part 2 (1), ' + systemPart1.v + ', and part 3 (2), ' + systemPart2.v);
+    log.info('The application version requirement, ' + userPartRequires + ' is less than or equal to the system versions for part 1 (3), ' + obj.systemPart3.v + ', part 2 (1), ' + obj.systemPart1.v + ', and part 3 (2), ' + obj.systemPart2.v);
   }
 }
 
@@ -180,27 +197,34 @@ function moduleFunction(l) {
 function moduleVersion(v, f) {
   if (f === 's') {
     // this is a system module, so we should be able to tell what system version we have or need
+    var name = 'N/A';
     switch(v) {
       case 108:
         // this is 0.6.2
+        name = '0.6.2';
         break;
       case 105:
         // this is 0.6.1
+        name = '0.6.1';
         break;
       case 102:
         // this is 0.6.0
+        name = '0.6.0';
         break;
       case 21:
         // this is 0.5.3
+        name = '0.5.3';
         break;
       case 17:
         // this is 0.5.2
+        name = '0.5.2';
         break;
       case 15:
         // this is 0.5.1
+        name = '0.5.1';
         break;
     }
-    return v;
+    return name;
   } else {
     return v;
   }
@@ -209,7 +233,6 @@ function moduleVersion(v, f) {
 function findUserPart(module) {
   return module.f === 'u';
 }
-
 function findSystemPart1(module) {
   return findSystemPart(module, '1');
 }
@@ -239,17 +262,17 @@ function flashSystem(version, part, address) {
 
   publishEventPr.then(
     function(data) {
-      if (data.body.ok) { console.log("Event published succesfully") }
+      if (data.body.ok) { log.info("Event published succesfully") }
     },
     function(err) {
-      console.log("Failed to publish event: " + err)
+      log.info("Failed to publish event: " + err)
     }
   );
 
-  console.log(info);
+  log.info(info);
   particle.flashDevice({ deviceId: address, files: { file1: firmwareSystemVersion[version.toString()][part - 1] }, auth: token }).then(function(data) {
-    console.log('Flashing part ' + part + ' of ' + version + ':', data);
+    log.info('Flashing part ' + part + ' of ' + version + ':', data);
   }, function(err) {
-    console.log('An error occurred while flashing the device:', err);
+    log.info('An error occurred while flashing the device:', err);
   });
 }
