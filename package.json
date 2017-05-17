@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/hwestbrook/particle-device-healer#readme",
   "dependencies": {
+    "eventsource": "^1.0.1",
     "particle-api-js": "^5.3.1"
   }
 }

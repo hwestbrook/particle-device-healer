@@ -1,22 +1,30 @@
 var Particle = require('particle-api-js');
 var particle = new Particle();
 var authParticle = require('./secrets/particle');
-var es;
 var token;
 
-var testEvents = require('./secrets/testEvents');
+var EventSource = require('eventsource');
 
 particle.login({username: authParticle.user_name, password: authParticle.password}).then(
   function(data) {
     token = data.body.access_token;
     console.log("Logged in to Particle, setting up device event stream");
-    particle.getEventStream({ deviceId: 'mine', auth: token }).then(function(stream) {
-      stream.on('event', parseEvents);
-    });
 
-    // setTimeout(function() {
-    //   parseSafeMode(testEvents.basic);  
-    // }, 1000);
+    // using event source instead of Particle api, as it doesn't seem to
+    // be reliable for subscribing to events... seems weird
+    var es = new EventSource('https://api.particle.io/v1/devices/events?access_token=' + token);
+    es.addEventListener('spark/status', parseEvents);
+    es.addEventListener('spark/device/app-hash', parseEvents);
+    es.addEventListener('spark/status/safe-mode', parseEvents);
+    es.addEventListener('spark/flash/status', parseEvents);
+    es.addEventListener('open', function(e) {
+      console.log("Connection to Particle events is open");
+    }, false);
+    es.addEventListener('error', function(e) {
+      if (e.readyState == EventSource.CLOSED) {
+        console.error("Connection was closed");
+      }
+    }, false);
   },
   function (err) {
     console.log('Could not log in.', err);
@@ -24,15 +32,17 @@ particle.login({username: authParticle.user_name, password: authParticle.passwor
 );
 
 var parseEvents = function(event) {
-  switch(event.name) {
+  console.log(event.type);
+  var data = JSON.parse(event.data);
+  switch(event.type) {
     case 'spark/status': 
-      console.log('Device ' + event.coreid + ' status: ' + event.data);
+      console.log('Device ' + data.coreid + ' status: ' + data.data);
       break;
     case 'spark/device/app-hash':
-      console.log('Device ' + event.coreid + ' has new firmware: ' + event.data);
+      console.log('Device ' + data.coreid + ' has new firmware: ' + data.data);
       break;
     case 'spark/status/safe-mode': 
-      parseSafeMode(event);
+      parseSafeMode(data);
       break;
   }
 }
@@ -66,7 +76,12 @@ var parseSafeMode = function(event) {
     systemPart1: systemPart1,
     systemPart2: systemPart2,
     systemPart3: systemPart3,
-  })
+  });
+
+  if (safeModeData.p !== 10) {
+    console.error('Cancelling update... This library is not working for anything other than the Electron');
+    return;
+  }
 
   // check if the system has the right modules
   var userPartRequires = userPart.d[0].v;
@@ -80,7 +95,9 @@ var parseSafeMode = function(event) {
     }
   }
 
-  if (parseInt(userPartRequires, 10) > parseInt(systemPart3.v, 10)) {
+  if (systemPart3 == null && parseInt(userPartRequires, 10) > parseInt(systemPart1.v, 10)) {
+    flashSystem(userPartRequires, 1, event.coreid);
+  } else if (parseInt(userPartRequires, 10) > parseInt(systemPart3.v, 10)) {
     console.log('The application requires system ' + userPartRequires + ' system part 1 (3) version is ' + systemPart3.v);
     flashSystem(userPartRequires, 1, event.coreid);
   } else if(parseInt(userPartRequires, 10) > parseInt(systemPart1.v, 10)) {
