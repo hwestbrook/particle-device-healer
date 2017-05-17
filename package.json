@@ -1,0 +1,27 @@
+{
+  "name": "particle-device-healer",
+  "version": "0.0.1",
+  "description": "Simple script to update Particle devices with bad system firmware",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hwestbrook/particle-device-healer.git"
+  },
+  "keywords": [
+    "particle",
+    "ota",
+    "update"
+  ],
+  "author": "hwestbrook",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hwestbrook/particle-device-healer/issues"
+  },
+  "homepage": "https://github.com/hwestbrook/particle-device-healer#readme",
+  "dependencies": {
+    "particle-api-js": "^5.3.1"
+  }
+}
